@@ -1,0 +1,406 @@
+---
+title: "PSTAT 131 Final Project"
+author: "Ezra Torio (9313297)"
+date: '2022-12-03'
+output:
+  html_document:
+    code_folding: show
+    toc: yes
+    toc_folding: yes
+    df_print: paged
+    theme: spacelab
+    highlight: monochrome
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+The purpose of this project is to explore concepts in Text Mining and Natural Language Processing (NLP) then apply them to a data set of our choice. We will be using a data set containing customer reviews and ratings for the Nike.com website. We aim to train a model to "understand" the attitude of each customer toward the Nike website based on their written reviews.
+
+## What is Text Mining and NLP?
+
+Text mining is the process of taking unstructured text and transforming it into structured data sets that can then be used for data analysis or machine learning. NLP is a branch of artificial intelligence that refers to the process of training computer programs to "understand" and analyze natural human language. 
+    
+## Why is NLP Important and Exciting?
+
+NLP has a staggering amount of potential applications. The ability to automate the analysis of human language can be applied to nearly every industry in the world. Just a few examples of NLP applications include: Language Translation, Sentiment Analysis, Chatbots, Predictive Text, Auto-Correcting, Social Media Monitoring, and Targeted Advertising. For this project, I am particularly interested in Sentiment Analysis.
+    
+## What is Sentiment Analysis?
+
+Sentiment Analysis (or Opinion Mining) is a branch of NLP that aims to "understand" the emotion behind unstructured text data. By using various Text Mining and NLP techniques, we are able to train computer programs to predict the emotional tone of a body of text. Sentiment Analysis has various applications, but for this project we will focus on customer feedback Sentiment Analysis.
+    
+## How We Will Use NLP
+
+The Nike_Reviews data set from Kaggle which contains 237 different customer reviews of the Nike.com website. The Nike.com website is used to order Nike products online. The Nike_Reviews data set has two fields: "review" and "star_rating". The "review" field contains bodies of text, written by customers. The "star_rating" field contains the customer's rating out of 5 stars. We will be using NLP in an attempt to train a model to predict customers' ratings based on their written reviews.
+
+## Project Roadmap
+
+1. Convert our data to a Tidy Text format
+2. Tokenize our data
+3. Remove Stop Words
+4. Explore the Word Frequency of our data
+5. Introduce Lexicons and explore the AFINN Lexicon
+6. Create Word Clouds and Word Networks
+7. Conduct tf-idf Analysis by Star Rating
+8. Create Word Correlation Networks
+9. Analyze Positive and Negative Contributions
+10. Perform a Sentiment Analysis by Star Rating
+11. Perform a Sentiment Analysis by review
+
+## Loading Packages
+
+First, we need to load all of the packages to be used in this project.
+
+```{r, message=FALSE, warning=FALSE}
+library(dplyr) #data manipulation
+library(ggplot2) #to visualize
+library(tidyr) #for nesting and unnesting our data
+library(broom) #converts data to tidy tibbles
+library(tm) #textmining functions
+library(tidytext) #contains important functions and lexicons
+library(stringr) #simplifies string manipulation
+library(wordcloud) #to create wordclouds 
+library(reshape2) #also for wordclouds
+library(textdata) #needed to use AFINN
+library(widyr) #to create word correlation networks
+library(ggraph) #to plot word networks
+library(igraph) #to plot word networks
+```
+
+## Loading Data
+
+Let's load the Nike_Reviews csv file.
+
+```{r}
+nike <- read.csv("/Users/ezratorio/Desktop/Nike_Reviews.csv") 
+```
+
+## Converting to Tidy Text Format with Tokens
+
+Let's convert the data to a tibble. Then, we'll create a data set for reviews and a data set for star ratings.
+
+```{r}
+data <- tibble(nike) 
+review_data <- as.character(data$review)
+rating_data <- data$star_rating 
+```
+
+In text mining, it is standard to tokenize your text by words. This means creating a tidy data frame where each observation contains only one word. In the tidytext package, we can use unnest_tokens() to tokenize our review data while maintaining the review_id and review_rating fields. unnest_tokens() also automatically converts words to lowercase and removes punctuation.
+
+```{r}
+#Creating a data frame with ID, Review, and Rating
+untidy_review_df <- tibble(review_id = 1:length(review_data), review_content = review_data,
+                        review_rating = rating_data)
+
+#Tokenizing the text in each review 
+review_df <- untidy_review_df %>%
+  unnest_tokens(word, review_content)
+
+review_df
+```
+
+After tokenizing, review_df now has 9832 observations.
+
+```{r}
+print(paste0("Number of Observations: ", nrow(review_df)))
+```
+
+## Stop Words
+
+Stop words are any words in our text that are not significantly useful in analysis. One way to interpret stop words are to think of them as filler words. Luckily, tidytext contains a data set "stop_words" that we can use to remove all stop words in our text.
+
+```{r}
+stop_words
+```
+
+Let's perform an anti_join on our data against the stop words.
+
+```{r}
+#Anti_join is removing any word in review_df that is also a word in stop_words
+review_df <- review_df %>%
+  anti_join(stop_words, by = 'word')
+
+review_df
+```
+
+After removing stop words, review_df only has 3734 observations.
+
+```{r}
+print(paste0("Number of Observations: ", nrow(review_df)))
+```
+
+## Exploring our Data
+
+We can use count() in the dplyr package to check the frequency of each word. We can use ggplot2 to visualize a histogram of the most common words.
+
+```{r}
+review_df %>%
+  count(word, sort = TRUE) %>%
+  filter(n > 15) %>%
+  mutate(word = reorder(word,n)) %>%
+  ggplot(aes(word,n)) +
+  geom_col() +
+  coord_flip()
+```
+
+## Lexicons in Tidytext
+
+The goal of this project is to train a model to predict the rating associated with a review based on the content of the review. Essentially, we are trying to derive some emotional value from text. The tidytext package contains sentiment lexicons. The tidytext package includes an NRC lexicon that assigns binary values to different emotions like anger, fear, joy, etc. It also includes a Bing lexicon that assigns every word a value of "positive" and "negative". For this project, we'll use the AFINN sentiment lexicon. This lexicon is a data set with two fields. It has a "word" field that contains 2,477 words from the English dictionary. It also has a "value" field that asigns a numeric positivity score to each word. Words with can have small/large positive values to assign values of positivity or small/large negative values to assign values of negativity. We can see how the AFINN lexicon works below.
+
+```{r}
+get_sentiments("afinn")
+```
+
+We can look at the most common "positive" words and "negative" words in our data by performing an inner join and plotting them.
+
+```{r}
+#Creating a data set of all positive words
+afinn_positive <- get_sentiments("afinn") %>%
+  filter(value > 0)
+```
+
+```{r}
+#Creating a data set of all positive words in our data
+review_df_pos <- review_df %>%
+  inner_join(afinn_positive, by = 'word')
+```
+
+```{r}
+#Plotting the most frequently used positive words in our data
+review_df_pos %>%
+  count(word, sort = TRUE) %>%
+  filter(n > 4) %>%
+  mutate(word = reorder(word,n)) %>%
+  ggplot(aes(word,n)) +
+  geom_col(fill = "#619CFF") +
+  coord_flip() 
+```
+
+Now, let's do the same for the negative words in our data.
+
+```{r}
+#Creating a data set of all negative words
+afinn_negative <- get_sentiments("afinn") %>%
+  filter(value < 0)
+```
+
+```{r}
+#Creating a data set of all negative words in our data
+review_df_neg <- review_df %>%
+  inner_join(afinn_negative, by = 'word')
+```
+
+```{r}
+#Plotting the most frequently used negative words in our data
+review_df_neg %>%
+  count(word, sort = TRUE) %>%
+  filter(n > 4) %>%
+  mutate(word = reorder(word,n)) %>%
+  ggplot(aes(word,n)) +
+  geom_col(fill = "#F8766D") +
+  coord_flip()
+```
+
+## Word Clouds
+
+Word Clouds are a great way to visualize the frequency of words in a data set. They can also be used to visualize the frequency of words by sentiment. 
+
+First, let's create a Word Cloud of the most common words in our data using the wordcloud() function from the wordcloud package.
+
+```{r}
+review_df %>%
+  count(word) %>%
+  with(wordcloud(word, n, max.words = 100))
+```
+
+As we can see, the most common words are nike, customer, service, and shoes. But these words do not help us much in understanding the sentiment of the reviews. So, let's create a Word Cloud to visualize the most common positive and negative words. For this, we can just use the Bing lexicon since we don't need a numeric value of positivity.
+
+```{r}
+review_df %>%
+  inner_join(get_sentiments("bing"), by = "word") %>%
+  filter(word != "refund") %>% #Refund is an anomally in our data set
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>% 
+  comparison.cloud(colors = c("red", "blue"), max.words = 100)
+```
+
+Note: we have removed "refund" from our set of words because it is seen as a "positive" word in the Bing lexicon but does not have a positive connotation in the context of our reviews. This is an example of an anomally.
+
+## Finding tf-idf Within Star Ratings
+
+tf-idf stands for term frequency-inverse document frequency. The tf-idf statistic can be used to find words that are particularly important to a particular document. In the context of our project, we might want to find which words are the most relevant in each star rating. For example, we might expect the word "amazing" to have a larger contribution to reviews with a 5 star rating while the word "bad" likely has a larger contribution to reviews with 1 star ratings.
+
+The tf-idf statistic is calculated by taking the product of two metrics: 
+1. How many times a word appears in a document
+2. The inverse document frequency of the word across a set of documents
+
+In our case, a "document" would be a tier of star ratings.
+
+First, let's create a data set that shows us how many times each word occurs in each star rating. 
+
+```{r}
+words_by_rating <- review_df %>%
+  inner_join(get_sentiments("afinn"), by = "word") %>%
+  count(review_rating, word, sort = TRUE) %>%
+  ungroup()
+
+words_by_rating
+```
+
+As we can see, words_by_rating gives us the number of times each word is used in each star rating. For example, the word "cancelled" is used 15 times in 1 star ratings across all of our reviews.
+
+Next we can use the bind_tf_idf() function to calculate the tf-idf statistic for each word.
+
+```{r}
+tf_idf <- words_by_rating %>% 
+  bind_tf_idf(word, review_rating, n) %>% 
+  arrange(desc(tf_idf))
+tf_idf
+```
+
+Now, let's plot the tf-idf statistics by word for each star rating.
+
+```{r}
+tf_idf %>%
+  group_by(review_rating) %>%
+  top_n(10, tf_idf) %>%
+  ungroup() %>%
+  mutate(word = reorder(word, tf_idf)) %>% 
+  ggplot(aes(word, tf_idf, fill = review_rating)) + 
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ review_rating, scales = "free") + 
+  ylab("tf-idf") +
+  coord_flip()
+
+```
+
+As we see here, "love" has the highest tf-idf statistic for 4/5 star reviews while "cancelled" has the highest tf-idf statistic for 1 star reviews.
+
+## Word Correlation Networks
+
+Word Correlation Networks can be used to find correlations between groups of documents based on the words used in them. In the context of our project, we could use these networks to show the correlation of star ratings with other star ratings based on word usage. For example, we might expect 4 star ratings and 5 star ratings to be heavily correlated due to similar word usage. 
+
+Let's create a data frame to correlate all of the star ratings based on word usage.
+
+```{r}
+review_word_cors <- words_by_rating %>%
+pairwise_cor(review_rating, word, n, sort = TRUE) 
+
+review_word_cors
+```
+Now, let's visualize this data frame using the ggraph package to see which star ratings use similar words.
+
+```{r}
+set.seed(0823)
+
+review_word_cors %>%
+  graph_from_data_frame() %>%
+  ggraph(layout = "fr") +
+  geom_edge_link(aes(alpha = correlation, width = correlation)) + 
+  geom_node_point(size = 6, color = "lightblue") + 
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_void()
+```
+
+Here, we see some of the relationships that we expected. 4 star ratings and 5 star ratings are heavily correlated based on word usage. Whereas, 1 star ratings have extremely weak correlations to 4 and 5 star ratings based on word usage.
+
+## Word Contribution
+
+We would like to gain a deeper understanding of which words are contributing the most positivity/negativity in our data. We can achieve this by creating a new data frame that multiplies the positivity value of each word by the occurences of the word in our data. For example, "amazing" has a positivity value of 4 in AFINN. "amazing" occurs 14 times in our data, therefore it's positivity contribution is 4x14 = 56.
+
+```{r}
+contributions <- review_df %>% 
+  inner_join(get_sentiments("afinn"), by = "word") %>% 
+  group_by(word) %>%
+  summarize(occurences = n(), contribution = sum(value))
+
+  contributions
+
+  contributions %>%
+    top_n(25, abs(contribution)) %>%
+    mutate(word = reorder(word, contribution)) %>% 
+    ggplot(aes(word, contribution, fill = contribution > 0)) + 
+    geom_col(show.legend = FALSE) +
+    coord_flip()
+```
+
+## Sentiment Analysis by Star Rating
+
+Let's explore the overall sentiment of all customers by star ratings. We can perform an inner join of review_df and the AFINN lexicon. Then we will group our data by review_rating and take the average sentiment scores.
+
+```{r}
+nike_sentiments <- review_df %>% 
+  inner_join(get_sentiments("afinn"), by = "word") %>% 
+  group_by(review_rating) %>%
+  summarise(sentiment_score = mean(value))
+
+nike_sentiments
+
+nike_sentiments %>%
+  ggplot(aes(review_rating, sentiment_score, fill = sentiment_score > 0)) + 
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  xlab("Review Rating") +
+  ylab("Average Sentiment Score")
+```
+
+Here, we see that customer reviews that were associated with 1 and 2 star reviews had negative average sentiment scores. The average sentiment score for reviews with 3 stars was slightly positive. The average sentiment score for reviews associated with 4 and 5 stars were positive. This shows that our sentiment analysis was successful in estimating customer attitudes from written reviews. 
+
+## Sentiment Analysis by Review
+
+Let's explore the most positive and negative reviews in our data. In order to find the average sentiment of each individual review, we can just create a new data frame that is grouped by review_id. Then we will arrange this data frame in ascending/descending order of sentiments to find our most polarized reviews.
+
+```{r}
+sentiment_reviews <- review_df %>% 
+  inner_join(get_sentiments("afinn"), by = "word") %>% 
+  group_by(review_id) %>%
+  summarize(review_sentiment = mean(value))
+
+sentiment_reviews
+
+sentiment_reviews %>%
+  arrange(desc(review_sentiment))
+```
+
+It looks like there are a lot of reviews that are tied for "most positive". Let's look at a few of them.
+
+```{r}
+print((review_data[95]))
+print((review_data[31]))
+print((review_data[61]))
+```
+
+Let's take a look at the "most negative" reviews.
+
+```{r}
+sentiment_reviews %>%
+  arrange(review_sentiment)
+```
+
+It looks like there are a lot of reviews that are tied for "most positive". Let's look at a few of them.
+
+```{r}
+print((review_data[18]))
+print((review_data[29]))
+print((review_data[41]))
+```
+
+All of these reviews seem to perfectly reflect the sentiment score that they were assigned! 
+
+## Summary
+
+Throughout this exploration of Text Mining and Natural Language Processing, I learned about many important concepts. I was introduced to the tidy text format, tokens, stop words, methods to visualize word frequency, methods to determine word importance, methods to determine word correlations, and how to perform different sentiment analyses. With this project, I was able to apply all of the concepts that I have explored. I was able to transform my unstructured data into a tidy text format. I was able to visualize word frequencies with bar plots and word clouds. I was able to determine word importance through the tf-idf statistic. I was able to create a word correlation network across star ratings. And finally, I was able to perform a sentiment analysis by star rating and also by customer. Each step along the way proved to be successful in the context of our data. We were able to gain various insights about our data and correctly predict the "attitudes" of our customers merely based on their written reviews.
+
+There are still some limitations to my analysis that I would like to explore in the future. For example, I have not yet taken a stab at how to detect sarcasm in text. I would also like to perform an N-gram analysis in the future to understand how words like "no" and "not" affect the meaning of sentences. I am excited to continue my learning and explore more advanced concepts like these.
+
+Overall, this project has been a fantastic way to explore a branch of machine learning that I am very passionate about. It has also been a great way to practice applying the concepts that I learned along the way. I would like to thank professor Coburn for granting me permission to pursue NLP despite it being very different from the traditional 131 project and also for providing me with the textbooks used to conduct the project. Text Mining with R by Julia Silge and David Robinson was integral in helping me figure out how to apply all of these concepts in R.
+
+
+
+
+
+
+
